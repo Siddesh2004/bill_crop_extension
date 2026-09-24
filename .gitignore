@@ -1,0 +1,20 @@
+# Node.js dependencies – reinstall with: npm install
+node_modules/
+
+# Old/unused bundle files no longer part of the build
+pdf-lib.bundle.js
+findInvoiceBounds.bundle.js
+
+# Build artifacts that can be regenerated (optional – keeping them
+# so the other laptop can load the extension WITHOUT running node build.js)
+# Uncomment the lines below if you prefer NOT to commit built files:
+# popup.bundle.js
+# pdf.worker.min.mjs
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/
+*.swp

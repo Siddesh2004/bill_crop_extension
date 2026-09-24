@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "Bill Cropper – Landscape A5",
+  "version": "1.3.0",
+  "description": "Dynamically crops the open billing invoice PDF and opens a print-ready A5 landscape PDF in a new tab. Works with both the live billing website and locally downloaded PDF files.",
+
+  "permissions": ["activeTab", "tabs", "storage", "scripting"],
+
+  "host_permissions": [
+    "https://maricodms.botreesoftware.com/*",
+    "file:///*"
+  ],
+
+  "background": {
+    "service_worker": "background.js"
+  },
+
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Crop bill to A5 landscape"
+  },
+
+  "web_accessible_resources": [
+    {
+      "resources": ["pdf.worker.min.mjs"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}
