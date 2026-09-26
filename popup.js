@@ -17,50 +17,64 @@ import { PDFDocument } from "pdf-lib";
 import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
 import { findInvoiceBounds } from "./findInvoiceBounds.js";
 
-// ── Page size candidates (PDF points; 1 pt = 1/72 inch, 1 mm = 2.8346 pt) ────
-// Tried in order; the first one where the content scale is ≥ MIN_READABLE_SCALE
-// is used.  This means a short invoice gets A5 landscape, a long one with many
-// items automatically upgrades to A4 landscape or A4 portrait so text stays
-// readable.
-const PAGE_CANDIDATES = [
-  { name: "A5 landscape", width: 595.28, height: 419.53 }, // 210 × 148 mm
-  { name: "A4 landscape", width: 841.89, height: 595.28 }, // 297 × 210 mm
-  { name: "A4 portrait",  width: 595.28, height: 841.89 }, // 210 × 297 mm
-];
+// ── Page size definitions (PDF points; 1 pt = 1/72 inch) ─────────────────────
+const PAGES = {
+  A5_LANDSCAPE: { name: "A5 landscape", width: 595.28, height: 419.53 }, // 210×148 mm
+  A4_LANDSCAPE: { name: "A4 landscape", width: 841.89, height: 595.28 }, // 297×210 mm
+  A4_PORTRAIT:  { name: "A4 portrait",  width: 595.28, height: 841.89 }, // 210×297 mm
+};
 
-// Minimum scale factor considered "readable".  Below this the extension upgrades
-// to the next larger page format.  0.80 means the invoice content is printed at
-// at least 80 % of its original PDF size.
+// Minimum scale considered "readable". Below this the extension upgrades format.
 const MIN_READABLE_SCALE = 0.80;
 
-// How many items on the invoice before we skip A5 and go straight to A4.
+// Items threshold: 6+ items → skip A5, use A4 sized pages.
 const LARGE_INVOICE_ITEM_THRESHOLD = 6;
 
 /**
- * Pick the smallest page from PAGE_CANDIDATES that lets the crop fit at
- * >= MIN_READABLE_SCALE.  When itemCount >= LARGE_INVOICE_ITEM_THRESHOLD,
- * A5 landscape is skipped entirely so that multi-item invoices are never
- * squeezed into a tiny font.  Always returns a page (falls back to A4 portrait).
+ * Pick the best output page for the given crop dimensions.
  *
- * @param {number} cropWidth  – crop width in PDF points
+ * Key insight: the invoice content is PORTRAIT-shaped (full A4 width, tall with
+ * many rows). Placing portrait content on a landscape page wastes horizontal
+ * space and shrinks the text. We therefore match page orientation to content
+ * orientation — portrait crop → try portrait page first, landscape crop →
+ * landscape page first — so the content fills the page at maximum scale.
+ *
+ * For 6+ items A5 landscape is always skipped.
+ *
+ * @param {number} cropWidth  – crop width  in PDF points
  * @param {number} cropHeight – crop height in PDF points
- * @param {number} itemCount  – number of line items on the invoice
+ * @param {number} itemCount  – number of line items detected in the invoice
  * @returns {{ name:string, width:number, height:number, scale:number }}
  */
 function choosePage(cropWidth, cropHeight, itemCount = 0) {
-  const isLarge = itemCount >= LARGE_INVOICE_ITEM_THRESHOLD;
+  const isLarge       = itemCount >= LARGE_INVOICE_ITEM_THRESHOLD;
+  const cropIsPortrait = cropHeight >= cropWidth; // bill content taller than wide
 
-  for (const page of PAGE_CANDIDATES) {
-    // Skip A5 landscape for invoices with many items.
-    if (isLarge && page.name === "A5 landscape") continue;
+  // Build candidate list with best-fit orientation first.
+  // Portrait content → portrait page before landscape (fills width perfectly).
+  // Landscape content → landscape page before portrait.
+  let candidates;
 
+  if (isLarge) {
+    // 6+ items: A5 skipped entirely.
+    candidates = cropIsPortrait
+      ? [PAGES.A4_PORTRAIT, PAGES.A4_LANDSCAPE]
+      : [PAGES.A4_LANDSCAPE, PAGES.A4_PORTRAIT];
+  } else {
+    candidates = cropIsPortrait
+      ? [PAGES.A5_LANDSCAPE, PAGES.A4_PORTRAIT, PAGES.A4_LANDSCAPE]
+      : [PAGES.A5_LANDSCAPE, PAGES.A4_LANDSCAPE, PAGES.A4_PORTRAIT];
+  }
+
+  for (const page of candidates) {
     const scale = Math.min(page.width / cropWidth, page.height / cropHeight);
     if (scale >= MIN_READABLE_SCALE) {
       return { ...page, scale };
     }
   }
-  // Fallback: last candidate (A4 portrait) regardless of scale.
-  const fallback = PAGE_CANDIDATES[PAGE_CANDIDATES.length - 1];
+
+  // Fallback: first candidate regardless of scale.
+  const fallback = candidates[0];
   const scale = Math.min(fallback.width / cropWidth, fallback.height / cropHeight);
   return { ...fallback, scale };
 }

@@ -53134,26 +53134,32 @@ Check the DevTools console for the full dump.`
       init_es2();
       init_pdf();
       init_findInvoiceBounds();
-      var PAGE_CANDIDATES = [
-        { name: "A5 landscape", width: 595.28, height: 419.53 },
-        // 210 × 148 mm
-        { name: "A4 landscape", width: 841.89, height: 595.28 },
-        // 297 × 210 mm
-        { name: "A4 portrait", width: 595.28, height: 841.89 }
-        // 210 × 297 mm
-      ];
+      var PAGES = {
+        A5_LANDSCAPE: { name: "A5 landscape", width: 595.28, height: 419.53 },
+        // 210×148 mm
+        A4_LANDSCAPE: { name: "A4 landscape", width: 841.89, height: 595.28 },
+        // 297×210 mm
+        A4_PORTRAIT: { name: "A4 portrait", width: 595.28, height: 841.89 }
+        // 210×297 mm
+      };
       var MIN_READABLE_SCALE = 0.8;
       var LARGE_INVOICE_ITEM_THRESHOLD = 6;
       function choosePage(cropWidth, cropHeight, itemCount = 0) {
         const isLarge = itemCount >= LARGE_INVOICE_ITEM_THRESHOLD;
-        for (const page of PAGE_CANDIDATES) {
-          if (isLarge && page.name === "A5 landscape") continue;
+        const cropIsPortrait = cropHeight >= cropWidth;
+        let candidates;
+        if (isLarge) {
+          candidates = cropIsPortrait ? [PAGES.A4_PORTRAIT, PAGES.A4_LANDSCAPE] : [PAGES.A4_LANDSCAPE, PAGES.A4_PORTRAIT];
+        } else {
+          candidates = cropIsPortrait ? [PAGES.A5_LANDSCAPE, PAGES.A4_PORTRAIT, PAGES.A4_LANDSCAPE] : [PAGES.A5_LANDSCAPE, PAGES.A4_LANDSCAPE, PAGES.A4_PORTRAIT];
+        }
+        for (const page of candidates) {
           const scale3 = Math.min(page.width / cropWidth, page.height / cropHeight);
           if (scale3 >= MIN_READABLE_SCALE) {
             return { ...page, scale: scale3 };
           }
         }
-        const fallback = PAGE_CANDIDATES[PAGE_CANDIDATES.length - 1];
+        const fallback = candidates[0];
         const scale2 = Math.min(fallback.width / cropWidth, fallback.height / cropHeight);
         return { ...fallback, scale: scale2 };
       }
