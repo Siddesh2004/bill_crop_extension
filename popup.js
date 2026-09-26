@@ -3,7 +3,12 @@
  *
  * Reads the billing PDF open in the current tab, dynamically detects the
  * invoice boundaries using PDF.js text extraction, crops the invoice region,
- * and opens the result as an A5 landscape PDF in a new tab.
+ * and opens the result as the best-fit print page in a new tab.
+ *
+ * Smart page selection: tries A5 landscape first; if the invoice has many
+ * items and would be scaled too small to read, it automatically upgrades
+ * to A4 landscape, then A4 portrait — always using the smallest format
+ * that keeps text readable.
  *
  * Nothing is printed automatically. The original PDF is never modified.
  */
@@ -12,11 +17,41 @@ import { PDFDocument } from "pdf-lib";
 import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
 import { findInvoiceBounds } from "./findInvoiceBounds.js";
 
-// ── A5 landscape page dimensions in PDF points (1 pt = 1/72 inch) ────────────
-// A5 = 148 × 210 mm  → landscape: 210 mm wide × 148 mm tall
-// 1 mm = 2.8346 pt
-const A5_WIDTH_PT  = 595.28;   // 210 mm
-const A5_HEIGHT_PT = 419.53;   // 148 mm
+// ── Page size candidates (PDF points; 1 pt = 1/72 inch, 1 mm = 2.8346 pt) ────
+// Tried in order; the first one where the content scale is ≥ MIN_READABLE_SCALE
+// is used.  This means a short invoice gets A5 landscape, a long one with many
+// items automatically upgrades to A4 landscape or A4 portrait so text stays
+// readable.
+const PAGE_CANDIDATES = [
+  { name: "A5 landscape", width: 595.28, height: 419.53 }, // 210 × 148 mm
+  { name: "A4 landscape", width: 841.89, height: 595.28 }, // 297 × 210 mm
+  { name: "A4 portrait",  width: 595.28, height: 841.89 }, // 210 × 297 mm
+];
+
+// Minimum scale factor considered "readable".  Below this the extension upgrades
+// to the next larger page format.  0.80 means the invoice content is printed at
+// at least 80 % of its original PDF size.
+const MIN_READABLE_SCALE = 0.80;
+
+/**
+ * Pick the smallest page from PAGE_CANDIDATES that lets the crop fit at
+ * >= MIN_READABLE_SCALE.  Always returns a page (falls back to A4 portrait).
+ * @param {number} cropWidth  – crop width in PDF points
+ * @param {number} cropHeight – crop height in PDF points
+ * @returns {{ name:string, width:number, height:number, scale:number }}
+ */
+function choosePage(cropWidth, cropHeight) {
+  for (const page of PAGE_CANDIDATES) {
+    const scale = Math.min(page.width / cropWidth, page.height / cropHeight);
+    if (scale >= MIN_READABLE_SCALE) {
+      return { ...page, scale };
+    }
+  }
+  // Fallback: last candidate (A4 portrait) regardless of scale.
+  const fallback = PAGE_CANDIDATES[PAGE_CANDIDATES.length - 1];
+  const scale = Math.min(fallback.width / cropWidth, fallback.height / cropHeight);
+  return { ...fallback, scale };
+}
 
 // ── Wire up PDF.js worker ─────────────────────────────────────────────────────
 // The worker file is in the extension root alongside manifest.json.
@@ -241,14 +276,14 @@ button.addEventListener("click", async () => {
       );
     }
 
-    // ── Stage 5: Create new A5 landscape document with the cropped content ───
-    setProgress("Preparing A5 landscape output…");
+    // ── Stage 5: Smart page selection & output document ──────────────────────
+    //
+    // choosePage() picks the smallest standard page (A5 landscape → A4 landscape
+    // → A4 portrait) where the invoice fits at ≥ MIN_READABLE_SCALE so the text
+    // is never squeezed unreadably small when there are many line items.
 
-    // Strategy: embed the cropped region of srcPage into a brand-new PDF page
-    // sized at A5 landscape. This ensures:
-    //   • The printer sees an A5 landscape page (not the original size).
-    //   • The invoice is scaled to fit while preserving its aspect ratio.
-    //   • Content outside the crop region is not present in the output.
+    const page = choosePage(cropWidth, cropHeight);
+    setProgress(`Preparing ${page.name} output…`);
 
     const outputDoc = await PDFDocument.create();
 
@@ -261,20 +296,19 @@ button.addEventListener("click", async () => {
       top:    cropY + cropHeight
     });
 
-    // Scale the embedded crop to fit the A5 landscape canvas.
-    const scaleX = A5_WIDTH_PT  / cropWidth;
-    const scaleY = A5_HEIGHT_PT / cropHeight;
-    const scale  = Math.min(scaleX, scaleY);   // preserve aspect ratio
+    // Scale the embedded crop to fill the chosen page (preserve aspect ratio).
+    const scaleX = page.width  / cropWidth;
+    const scaleY = page.height / cropHeight;
+    const scale  = Math.min(scaleX, scaleY);
 
     const scaledW = cropWidth  * scale;
     const scaledH = cropHeight * scale;
 
-    // Centre the scaled invoice on the A5 page.
-    const drawX = (A5_WIDTH_PT  - scaledW) / 2;
-    const drawY = (A5_HEIGHT_PT - scaledH) / 2;
+    // Centre the scaled invoice on the output page.
+    const drawX = (page.width  - scaledW) / 2;
+    const drawY = (page.height - scaledH) / 2;
 
-    // Add an A5 landscape page.
-    const outPage = outputDoc.addPage([A5_WIDTH_PT, A5_HEIGHT_PT]);
+    const outPage = outputDoc.addPage([page.width, page.height]);
 
     outPage.drawPage(embeddedPage, {
       x:      drawX,
@@ -294,9 +328,11 @@ button.addEventListener("click", async () => {
 
     await chrome.tabs.create({ url: dataUri });
 
+    const pct = Math.round(scale * 100);
     setStatus(
-      "✓ Cropped PDF opened in a new tab.\n" +
-      "Inspect the crop, then use Chrome's Print button to print on A5 landscape."
+      `✓ Cropped PDF opened (${page.name}, ${pct}% scale).\n` +
+      `Inspect the crop, then use Chrome's Print button.\n` +
+      `Set paper size to "${page.name}" in the print dialog.`
     );
 
   } catch (err) {

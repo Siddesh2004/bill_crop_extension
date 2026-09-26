@@ -53124,8 +53124,26 @@ Check the DevTools console for the full dump.`
       init_es2();
       init_pdf();
       init_findInvoiceBounds();
-      var A5_WIDTH_PT = 595.28;
-      var A5_HEIGHT_PT = 419.53;
+      var PAGE_CANDIDATES = [
+        { name: "A5 landscape", width: 595.28, height: 419.53 },
+        // 210 × 148 mm
+        { name: "A4 landscape", width: 841.89, height: 595.28 },
+        // 297 × 210 mm
+        { name: "A4 portrait", width: 595.28, height: 841.89 }
+        // 210 × 297 mm
+      ];
+      var MIN_READABLE_SCALE = 0.8;
+      function choosePage(cropWidth, cropHeight) {
+        for (const page of PAGE_CANDIDATES) {
+          const scale3 = Math.min(page.width / cropWidth, page.height / cropHeight);
+          if (scale3 >= MIN_READABLE_SCALE) {
+            return { ...page, scale: scale3 };
+          }
+        }
+        const fallback = PAGE_CANDIDATES[PAGE_CANDIDATES.length - 1];
+        const scale2 = Math.min(fallback.width / cropWidth, fallback.height / cropHeight);
+        return { ...fallback, scale: scale2 };
+      }
       GlobalWorkerOptions.workerSrc = chrome.runtime.getURL("pdf.worker.min.mjs");
       var statusEl = document.getElementById("status");
       var button = document.getElementById("go");
@@ -53250,7 +53268,8 @@ Make sure you are logged in and the billing page is open.`
 topViewport=${bounds.topViewport.toFixed(1)}, bottomViewport=${bounds.bottomViewport.toFixed(1)}`
             );
           }
-          setProgress("Preparing A5 landscape output\u2026");
+          const page = choosePage(cropWidth, cropHeight);
+          setProgress(`Preparing ${page.name} output\u2026`);
           const outputDoc = await PDFDocument_default.create();
           const embeddedPage = await outputDoc.embedPage(srcPage, {
             left: cropX,
@@ -53258,14 +53277,14 @@ topViewport=${bounds.topViewport.toFixed(1)}, bottomViewport=${bounds.bottomView
             right: cropX + cropWidth,
             top: cropY + cropHeight
           });
-          const scaleX = A5_WIDTH_PT / cropWidth;
-          const scaleY = A5_HEIGHT_PT / cropHeight;
+          const scaleX = page.width / cropWidth;
+          const scaleY = page.height / cropHeight;
           const scale2 = Math.min(scaleX, scaleY);
           const scaledW = cropWidth * scale2;
           const scaledH = cropHeight * scale2;
-          const drawX = (A5_WIDTH_PT - scaledW) / 2;
-          const drawY = (A5_HEIGHT_PT - scaledH) / 2;
-          const outPage = outputDoc.addPage([A5_WIDTH_PT, A5_HEIGHT_PT]);
+          const drawX = (page.width - scaledW) / 2;
+          const drawY = (page.height - scaledH) / 2;
+          const outPage = outputDoc.addPage([page.width, page.height]);
           outPage.drawPage(embeddedPage, {
             x: drawX,
             y: drawY,
@@ -53277,8 +53296,11 @@ topViewport=${bounds.topViewport.toFixed(1)}, bottomViewport=${bounds.bottomView
           const base64 = _uint8ToBase64(outputBytes);
           const dataUri = `data:application/pdf;base64,${base64}`;
           await chrome.tabs.create({ url: dataUri });
+          const pct = Math.round(scale2 * 100);
           setStatus(
-            "\u2713 Cropped PDF opened in a new tab.\nInspect the crop, then use Chrome's Print button to print on A5 landscape."
+            `\u2713 Cropped PDF opened (${page.name}, ${pct}% scale).
+Inspect the crop, then use Chrome's Print button.
+Set paper size to "${page.name}" in the print dialog.`
           );
         } catch (err) {
           console.error("[Bill Cropper] Error:", err);
