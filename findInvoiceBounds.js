@@ -191,6 +191,19 @@ export async function findInvoiceBounds(bytes) {
     const leftViewport = 0;
     const rightViewport = viewport.width;
 
+    // ── 5. Extract item count ─────────────────────────────────────────────────
+    // The PDF contains a row like "No.of items sold: 7". Parse it so the caller
+    // can decide the output page size based on invoice length.
+    let itemCount = 0;
+    for (const line of lines) {
+      const m = line.text.match(/NO\.?\s*OF\s+ITEMS?\s+SOLD[:\s]+(\d+)/i);
+      if (m) {
+        itemCount = parseInt(m[1], 10) || 0;
+        break;
+      }
+    }
+    console.log(`[Bill Cropper] Item count detected: ${itemCount}`);
+
     return {
       topViewport,
       bottomViewport,
@@ -198,6 +211,7 @@ export async function findInvoiceBounds(bytes) {
       rightViewport,
       pageWidth: viewport.width,
       pageHeight: viewport.height,
+      itemCount,
       // Human-readable info for debugging
       headingText: headingLine.text,
       amountText: amountLine.text,

@@ -53096,6 +53096,15 @@ Check the DevTools console for the full dump.`
       );
       const leftViewport = 0;
       const rightViewport = viewport.width;
+      let itemCount = 0;
+      for (const line of lines) {
+        const m = line.text.match(/NO\.?\s*OF\s+ITEMS?\s+SOLD[:\s]+(\d+)/i);
+        if (m) {
+          itemCount = parseInt(m[1], 10) || 0;
+          break;
+        }
+      }
+      console.log(`[Bill Cropper] Item count detected: ${itemCount}`);
       return {
         topViewport,
         bottomViewport,
@@ -53103,6 +53112,7 @@ Check the DevTools console for the full dump.`
         rightViewport,
         pageWidth: viewport.width,
         pageHeight: viewport.height,
+        itemCount,
         // Human-readable info for debugging
         headingText: headingLine.text,
         amountText: amountLine.text,
@@ -53133,8 +53143,11 @@ Check the DevTools console for the full dump.`
         // 210 × 297 mm
       ];
       var MIN_READABLE_SCALE = 0.8;
-      function choosePage(cropWidth, cropHeight) {
+      var LARGE_INVOICE_ITEM_THRESHOLD = 6;
+      function choosePage(cropWidth, cropHeight, itemCount = 0) {
+        const isLarge = itemCount >= LARGE_INVOICE_ITEM_THRESHOLD;
         for (const page of PAGE_CANDIDATES) {
+          if (isLarge && page.name === "A5 landscape") continue;
           const scale3 = Math.min(page.width / cropWidth, page.height / cropHeight);
           if (scale3 >= MIN_READABLE_SCALE) {
             return { ...page, scale: scale3 };
@@ -53249,7 +53262,7 @@ Make sure you are logged in and the billing page is open.`
               "Invoice boundary detection failed:\n" + detectionErr.message
             );
           }
-          console.log("[Bill Cropper] Detected bounds:", bounds);
+          console.log("[Bill Cropper] Detected bounds:", bounds, "| items:", bounds.itemCount);
           setProgress("Cropping invoice\u2026");
           const srcDoc = await PDFDocument_default.load(pdfLibBytes);
           const srcPages = srcDoc.getPages();
@@ -53268,7 +53281,7 @@ Make sure you are logged in and the billing page is open.`
 topViewport=${bounds.topViewport.toFixed(1)}, bottomViewport=${bounds.bottomViewport.toFixed(1)}`
             );
           }
-          const page = choosePage(cropWidth, cropHeight);
+          const page = choosePage(cropWidth, cropHeight, bounds.itemCount);
           setProgress(`Preparing ${page.name} output\u2026`);
           const outputDoc = await PDFDocument_default.create();
           const embeddedPage = await outputDoc.embedPage(srcPage, {

@@ -33,15 +33,27 @@ const PAGE_CANDIDATES = [
 // at least 80 % of its original PDF size.
 const MIN_READABLE_SCALE = 0.80;
 
+// How many items on the invoice before we skip A5 and go straight to A4.
+const LARGE_INVOICE_ITEM_THRESHOLD = 6;
+
 /**
  * Pick the smallest page from PAGE_CANDIDATES that lets the crop fit at
- * >= MIN_READABLE_SCALE.  Always returns a page (falls back to A4 portrait).
+ * >= MIN_READABLE_SCALE.  When itemCount >= LARGE_INVOICE_ITEM_THRESHOLD,
+ * A5 landscape is skipped entirely so that multi-item invoices are never
+ * squeezed into a tiny font.  Always returns a page (falls back to A4 portrait).
+ *
  * @param {number} cropWidth  – crop width in PDF points
  * @param {number} cropHeight – crop height in PDF points
+ * @param {number} itemCount  – number of line items on the invoice
  * @returns {{ name:string, width:number, height:number, scale:number }}
  */
-function choosePage(cropWidth, cropHeight) {
+function choosePage(cropWidth, cropHeight, itemCount = 0) {
+  const isLarge = itemCount >= LARGE_INVOICE_ITEM_THRESHOLD;
+
   for (const page of PAGE_CANDIDATES) {
+    // Skip A5 landscape for invoices with many items.
+    if (isLarge && page.name === "A5 landscape") continue;
+
     const scale = Math.min(page.width / cropWidth, page.height / cropHeight);
     if (scale >= MIN_READABLE_SCALE) {
       return { ...page, scale };
@@ -225,7 +237,7 @@ button.addEventListener("click", async () => {
       );
     }
 
-    console.log("[Bill Cropper] Detected bounds:", bounds);
+    console.log("[Bill Cropper] Detected bounds:", bounds, "| items:", bounds.itemCount);
 
     // ── Stage 3: Load the PDF with pdf-lib ───────────────────────────────────
     setProgress("Cropping invoice…");
@@ -282,7 +294,7 @@ button.addEventListener("click", async () => {
     // → A4 portrait) where the invoice fits at ≥ MIN_READABLE_SCALE so the text
     // is never squeezed unreadably small when there are many line items.
 
-    const page = choosePage(cropWidth, cropHeight);
+    const page = choosePage(cropWidth, cropHeight, bounds.itemCount);
     setProgress(`Preparing ${page.name} output…`);
 
     const outputDoc = await PDFDocument.create();
